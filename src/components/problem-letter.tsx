@@ -63,7 +63,7 @@ export function ProblemLetter({ problem: p }: { problem: ContestProblemView }) {
 export function ContestProblemName({ problem: p }: { problem: ContestProblemView }) {
   const action = useProblemAction(p);
   const className = "text-left font-semibold underline-offset-4 hover:underline";
-  const style = { color: tierColor("codeforces", p.difficulty) };
+  const style = { color: tierColor(p.platform, p.difficulty) };
 
   return (
     <span className="inline-flex items-center gap-2">

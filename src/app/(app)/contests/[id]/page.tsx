@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/auth";
 import { participationLabel, ratingDelta } from "@/lib/contest-labels";
 import { getContest, type ContestProblemView } from "@/lib/contests";
 import { formatDay } from "@/lib/dates";
+import { PLATFORM_NAMES } from "@/lib/difficulty";
 import { listAllTags } from "@/lib/problems";
 import { AddToUpsolveButton } from "./add-to-upsolve-button";
 
@@ -48,7 +49,7 @@ async function ContestDetail({ params }: Pick<PageProps<"/contests/[id]">, "para
           )}
           {contest.url && (
             <a href={contest.url} target="_blank" rel="noreferrer" className="underline underline-offset-4 hover:text-ink">
-              Open on Codeforces
+              Open on {PLATFORM_NAMES[contest.platform]}
             </a>
           )}
         </div>

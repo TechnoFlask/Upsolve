@@ -2,11 +2,13 @@ import { sql } from "drizzle-orm";
 import {
   index,
   integer,
+  primaryKey,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 // Relative import: drizzle-kit loads this file without the "@/" path alias.
+import type { SolutionAnalysis } from "../lib/analysis-schema";
 import { PARTICIPATIONS, PLATFORMS, SOLVED_DURING, STATUSES } from "../lib/constants";
 
 export { PLATFORMS, STATUSES };
@@ -83,9 +85,15 @@ export const problems = sqliteTable(
       .default(false),
     solvedAt: integer("solved_at", { mode: "timestamp" }),
     notes: text("notes"),
-    aiApproach: text("ai_approach"),
-    aiModel: text("ai_model"),
     solvedDuring: text("solved_during", { enum: SOLVED_DURING }),
+    // Your latest accepted submission on the judge (from sync).
+    submissionId: integer("submission_id"),
+    submissionLanguage: text("submission_language"),
+    // Code you pasted in for analysis, and the model's analysis of it.
+    solutionCode: text("solution_code"),
+    analysis: text("analysis", { mode: "json" }).$type<SolutionAnalysis>(),
+    analysisModel: text("analysis_model"),
+    analyzedAt: integer("analyzed_at", { mode: "timestamp" }),
     source: text("source", { enum: ["manual", "sync"] })
       .notNull()
       .default("manual"),
@@ -95,6 +103,67 @@ export const problems = sqliteTable(
     uniqueIndex("problems_platform_ext_idx").on(t.platform, t.externalId),
     index("problems_status_idx").on(t.status),
     index("problems_solved_at_idx").on(t.solvedAt),
+  ],
+);
+
+// The judge's whole problem catalogue, refreshed on sync. The daily planner
+// picks suggestions from here; solvedCount is a rough quality/popularity signal.
+export const problemset = sqliteTable(
+  "problemset",
+  {
+    platform: text("platform", { enum: PLATFORMS }).notNull(),
+    externalId: text("external_id").notNull(),
+    contestId: integer("contest_id").notNull(),
+    index: text("index").notNull(),
+    name: text("name").notNull(),
+    rating: integer("rating"),
+    tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+    solvedCount: integer("solved_count").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.platform, t.externalId] }),
+    index("problemset_rating_idx").on(t.platform, t.rating),
+  ],
+);
+
+export const PRACTICE_SLOTS = ["warmup", "core", "weak", "stretch", "upsolve"] as const;
+export type PracticeSlot = (typeof PRACTICE_SLOTS)[number];
+
+/** One day's practice plan. `level` is the rating the plan was built around. */
+export const practicePlans = sqliteTable("practice_plans", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  day: text("day").notNull().unique(),
+  level: integer("level").notNull(),
+  size: integer("size").notNull(),
+  theme: text("theme"),
+  coachNote: text("coach_note"),
+  model: text("model"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+export const practiceItems = sqliteTable(
+  "practice_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    planId: integer("plan_id")
+      .notNull()
+      .references(() => practicePlans.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    slot: text("slot", { enum: PRACTICE_SLOTS }).notNull(),
+    platform: text("platform", { enum: PLATFORMS }).notNull(),
+    externalId: text("external_id").notNull(),
+    name: text("name").notNull(),
+    url: text("url"),
+    difficulty: integer("difficulty"),
+    tags: text("tags", { mode: "json" }).$type<string[]>().notNull().default([]),
+    reason: text("reason").notNull(),
+    focusTag: text("focus_tag"),
+  },
+  (t) => [
+    uniqueIndex("practice_items_plan_problem_idx").on(t.planId, t.externalId),
+    index("practice_items_ext_idx").on(t.platform, t.externalId),
   ],
 );
 
@@ -118,3 +187,6 @@ export type Problem = typeof problems.$inferSelect;
 export type NewProblem = typeof problems.$inferInsert;
 export type Contest = typeof contests.$inferSelect;
 export type ContestProblem = typeof contestProblems.$inferSelect;
+export type PracticePlan = typeof practicePlans.$inferSelect;
+export type PracticeItem = typeof practiceItems.$inferSelect;
+export type CatalogProblem = typeof problemset.$inferSelect;

@@ -5,8 +5,10 @@ import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
 const LINKS = [
+  { href: "/today", label: "Today" },
   { href: "/", label: "Problems" },
   { href: "/contests", label: "Contests" },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/sync", label: "Sync" },
 ];
 
@@ -26,7 +28,7 @@ function ActiveLinks() {
 
 function Links({ pathname }: { pathname: string | null }) {
   return (
-    <nav className="flex gap-4">
+    <nav className="order-last flex w-full gap-5 sm:order-none sm:w-auto sm:gap-4">
       {LINKS.map((l) => {
         const active = pathname != null && (l.href === "/" ? pathname === "/" : pathname.startsWith(l.href));
         return (

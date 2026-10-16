@@ -12,6 +12,7 @@ import { PLATFORMS, STATUSES, type Platform } from "@/lib/constants";
 import { toDateInput } from "@/lib/dates";
 import { LEETCODE_LEVELS, PLATFORM_NAMES, STATUS_META } from "@/lib/difficulty";
 import { parseProblemUrl } from "@/lib/parse-problem-url";
+import { SolutionPanel } from "./solution-panel";
 
 type Props = {
   problem: Problem | "new" | null;
@@ -77,6 +78,11 @@ function ProblemForm({
   const [externalId, setExternalId] = useState(problem?.externalId ?? "");
   const [name, setName] = useState(problem?.name ?? "");
   const [urlHint, setUrlHint] = useState<string | null>(null);
+  // Controlled, so tags accepted from the solution analysis show up here and
+  // aren't wiped when you save the form.
+  const [tags, setTags] = useState(problem?.tags.join(", ") ?? "");
+  const tagList = splitTags(tags);
+  const acceptTags = (added: string[]) => setTags((current) => [...new Set([...splitTags(current), ...added])].join(", "));
 
   useEffect(() => {
     if (state.ok) onDone();
@@ -119,6 +125,7 @@ function ProblemForm({
       </div>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        {problem && <SolutionPanel problem={problem} tags={tagList} onTagsAccepted={acceptTags} />}
         <Field label="Link" hint={urlHint ?? "Paste a Codeforces, LeetCode or AtCoder link to fill in the details."} error={err("url")}>
           {(id, describedBy) => (
             <input
@@ -254,7 +261,8 @@ function ProblemForm({
                 id={id}
                 name="tags"
                 list="known-tags"
-                defaultValue={problem?.tags.join(", ") ?? ""}
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
                 placeholder="greedy, binary search"
                 aria-describedby={describedBy}
                 className={inputClass}
@@ -328,3 +336,5 @@ function Field(props: {
     </div>
   );
 }
+
+const splitTags = (value: string) => value.split(",").map((t) => t.trim()).filter(Boolean);

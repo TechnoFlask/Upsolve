@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import { FilterBar } from "@/components/filter-bar";
 import { ProblemList } from "@/components/problem-list";
 import { requireSession } from "@/lib/auth";
 import { listAllTags, listProblems, parseProblemFilters, problemCounts } from "@/lib/problems";
@@ -36,7 +35,6 @@ async function Problems({ searchParams }: Pick<PageProps<"/">, "searchParams">) 
       summary={summarize(counts)}
       isEmpty={counts.total === 0}
       filtered={filtered}
-      filterBar={<FilterBar params={params} allTags={tags} />}
       sort={{ field: filters.sort, dir: filters.dir }}
       params={params}
     />

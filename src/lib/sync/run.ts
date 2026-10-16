@@ -2,15 +2,12 @@ import "server-only";
 import type { BatchItem } from "drizzle-orm/batch";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, contestProblems, contests, problems } from "@/db/schema";
-import {
-  fetchAll,
-  hasChanges,
-  mergeWithExisting,
-  sameTags,
-  summarizeContests,
-  summarizeSubmissions,
-} from "./codeforces";
+import { accounts, contestProblems, contests, problems, problemset } from "@/db/schema";
+import * as atcoder from "./atcoder";
+import { buildCatalog, catalogEntryChanged, fetchAll, type CatalogEntry, summarizeContests, summarizeSubmissions } from "./codeforces";
+import { hasChanges, mergeWithExisting, sameTags, type SyncedContest, type SyncedProblem } from "./merge";
+
+type SyncedPlatform = "codeforces" | "atcoder";
 
 export type SyncResult = {
   added: number;
@@ -29,14 +26,67 @@ async function runInBatches(statements: BatchItem<"sqlite">[]) {
   }
 }
 
+async function refreshCatalog(entries: CatalogEntry[]) {
+  const existing = new Map(
+    (
+      await db
+        .select({
+          externalId: problemset.externalId,
+          name: problemset.name,
+          rating: problemset.rating,
+          tags: problemset.tags,
+          solvedCount: problemset.solvedCount,
+        })
+        .from(problemset)
+        .where(eq(problemset.platform, "codeforces"))
+    ).map((r) => [r.externalId, r]),
+  );
+  const writes: BatchItem<"sqlite">[] = [];
+  for (const e of entries) {
+    const row = existing.get(e.externalId);
+    if (!row || catalogEntryChanged(row, e)) {
+      writes.push(
+        db
+          .insert(problemset)
+          .values({ platform: "codeforces", ...e })
+          .onConflictDoUpdate({
+            target: [problemset.platform, problemset.externalId],
+            set: { name: e.name, rating: e.rating, tags: e.tags, solvedCount: e.solvedCount },
+          }),
+      );
+    }
+  }
+  await runInBatches(writes);
+}
+
 export async function syncCodeforces(handle: string): Promise<SyncResult> {
   const data = await fetchAll(handle);
-  const synced = summarizeSubmissions(data.submissions);
-  const syncedContests = summarizeContests(data);
+  await refreshCatalog(buildCatalog(data.problemset, data.problemStatistics));
+  return saveSync("codeforces", handle, summarizeSubmissions(data.submissions), summarizeContests(data));
+}
 
+export async function syncAtCoder(handle: string): Promise<SyncResult> {
+  const data = await atcoder.fetchAll(handle);
+  // AtCoder can't tell an unknown user from one who hasn't started, so don't save a typo.
+  if (data.submissions.length === 0 && data.history.length === 0) {
+    throw new Error(`Found no submissions or contests for ${handle} on AtCoder. Check the spelling; handles are case-sensitive.`);
+  }
+  return saveSync("atcoder", handle, atcoder.summarizeSubmissions(data), atcoder.summarizeContests(data));
+}
+
+/**
+ * Write one judge's problems, contests and contest problem sets, then stamp the
+ * account. Only rows that actually changed are written.
+ */
+async function saveSync(
+  platform: SyncedPlatform,
+  handle: string,
+  synced: SyncedProblem[],
+  syncedContests: SyncedContest[],
+): Promise<SyncResult> {
   // --- problems you submitted to
   const existingProblems = new Map(
-    (await db.select().from(problems).where(eq(problems.platform, "codeforces"))).map((r) => [r.externalId, r]),
+    (await db.select().from(problems).where(eq(problems.platform, platform))).map((r) => [r.externalId, r]),
   );
   const writes: BatchItem<"sqlite">[] = [];
   let added = 0;
@@ -47,7 +97,7 @@ export async function syncCodeforces(handle: string): Promise<SyncResult> {
     if (!row) {
       added++;
       writes.push(
-        db.insert(problems).values({ platform: "codeforces", externalId: incoming.externalId, source: "sync", ...merged }),
+        db.insert(problems).values({ platform, externalId: incoming.externalId, source: "sync", ...merged }),
       );
     } else if (hasChanges(row, merged)) {
       updated++;
@@ -55,14 +105,14 @@ export async function syncCodeforces(handle: string): Promise<SyncResult> {
         db
           .update(problems)
           .set(merged)
-          .where(and(eq(problems.platform, "codeforces"), eq(problems.externalId, incoming.externalId))),
+          .where(and(eq(problems.platform, platform), eq(problems.externalId, incoming.externalId))),
       );
     }
   }
 
   // --- contests (your notes on a contest are never touched)
   const existingContests = new Map(
-    (await db.select().from(contests).where(eq(contests.platform, "codeforces"))).map((c) => [c.externalId, c]),
+    (await db.select().from(contests).where(eq(contests.platform, platform))).map((c) => [c.externalId, c]),
   );
   for (const c of syncedContests) {
     const fields = {
@@ -77,7 +127,7 @@ export async function syncCodeforces(handle: string): Promise<SyncResult> {
     };
     const row = existingContests.get(c.externalId);
     if (!row) {
-      writes.push(db.insert(contests).values({ platform: "codeforces", ...fields }));
+      writes.push(db.insert(contests).values({ platform, ...fields }));
     } else if (
       row.name !== fields.name ||
       row.date?.getTime() !== fields.date?.getTime() ||
@@ -93,7 +143,7 @@ export async function syncCodeforces(handle: string): Promise<SyncResult> {
 
   // --- each contest's full problem set (needs contest row ids from above)
   const contestIds = new Map(
-    (await db.select({ id: contests.id, externalId: contests.externalId }).from(contests).where(eq(contests.platform, "codeforces"))).map(
+    (await db.select({ id: contests.id, externalId: contests.externalId }).from(contests).where(eq(contests.platform, platform))).map(
       (c) => [c.externalId, c.id],
     ),
   );
@@ -118,7 +168,7 @@ export async function syncCodeforces(handle: string): Promise<SyncResult> {
   cpWrites.push(
     db
       .insert(accounts)
-      .values({ platform: "codeforces", handle, lastSyncedAt: now })
+      .values({ platform, handle, lastSyncedAt: now })
       .onConflictDoUpdate({ target: accounts.platform, set: { handle, lastSyncedAt: now } }),
   );
   await runInBatches(cpWrites);

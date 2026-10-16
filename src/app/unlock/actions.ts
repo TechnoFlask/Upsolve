@@ -18,9 +18,9 @@ const WINDOW_MS = 15 * 60 * 1000;
 export type UnlockState = { error?: string };
 
 function safeNext(value: FormDataEntryValue | null): string {
-  const next = typeof value === "string" ? value : "/";
+  const next = typeof value === "string" ? value : "/today";
   // Only same-site relative paths; blocks "//evil.com" and absolute URLs.
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  return next.startsWith("/") && !next.startsWith("//") ? next : "/today";
 }
 
 export async function unlock(_prev: UnlockState, formData: FormData): Promise<UnlockState> {

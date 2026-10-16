@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gte, inArray, like, lt, lte, or, sql, type SQL } fr
 import { z } from "zod";
 import { db } from "@/db";
 import { PLATFORMS, STATUSES, problems } from "@/db/schema";
+import { SOLVED_DURING } from "@/lib/constants";
 import { endOfDayExclusive, startOfDay } from "@/lib/dates";
 
 const csv = <T extends z.ZodType<unknown, string>>(item: T) =>
@@ -19,7 +20,7 @@ const optionalDay = z
   .optional()
   .catch(undefined);
 
-export const SORT_FIELDS = ["solvedAt", "difficulty", "name", "tries", "updatedAt"] as const;
+export const SORT_FIELDS = ["solvedAt", "difficulty", "name", "platform", "tries", "updatedAt"] as const;
 
 // Parsed from URL search params so filters are shareable and survive reloads.
 export const problemFiltersSchema = z.object({
@@ -27,11 +28,16 @@ export const problemFiltersSchema = z.object({
   platform: csv(z.enum(PLATFORMS)).catch([]),
   status: csv(z.enum(STATUSES)).catch([]),
   tag: csv(z.string()).catch([]),
+  // Several tags: "all" of them (default) or "any" of them.
+  tagMode: z.enum(["all", "any"]).catch("all").default("all"),
   minDifficulty: optionalInt,
   maxDifficulty: optionalInt,
+  minTries: optionalInt,
+  maxTries: optionalInt,
   from: optionalDay,
   to: optionalDay,
   editorial: z.enum(["yes", "no"]).optional().catch(undefined),
+  during: csv(z.enum(SOLVED_DURING)).catch([]),
   sort: z.enum(SORT_FIELDS).catch("solvedAt").default("solvedAt"),
   dir: z.enum(["asc", "desc"]).catch("desc").default("desc"),
 });
@@ -58,15 +64,18 @@ export async function listProblems(f: ProblemFilters) {
   }
   if (f.platform.length) where.push(inArray(problems.platform, f.platform));
   if (f.status.length) where.push(inArray(problems.status, f.status));
-  for (const tag of f.tag) {
-    where.push(sql`exists (select 1 from json_each(${problems.tags}) where value = ${tag})`);
-  }
+  const hasTag = (tag: string) => sql`exists (select 1 from json_each(${problems.tags}) where value = ${tag})`;
+  if (f.tag.length && f.tagMode === "any") where.push(or(...f.tag.map(hasTag))!);
+  else for (const tag of f.tag) where.push(hasTag(tag));
   if (f.minDifficulty !== undefined) where.push(gte(problems.difficulty, f.minDifficulty));
   if (f.maxDifficulty !== undefined) where.push(lte(problems.difficulty, f.maxDifficulty));
   // Whole days in the display timezone; "to" includes the day itself.
   if (f.from) where.push(gte(problems.solvedAt, startOfDay(f.from)));
   if (f.to) where.push(lt(problems.solvedAt, endOfDayExclusive(f.to)));
+  if (f.minTries !== undefined) where.push(gte(problems.tries, f.minTries));
+  if (f.maxTries !== undefined) where.push(lte(problems.tries, f.maxTries));
   if (f.editorial) where.push(eq(problems.usedEditorial, f.editorial === "yes"));
+  if (f.during.length) where.push(inArray(problems.solvedDuring, f.during));
 
   const order = f.dir === "asc" ? asc : desc;
   return db

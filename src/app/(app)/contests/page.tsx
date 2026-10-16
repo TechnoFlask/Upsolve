@@ -7,6 +7,7 @@ import { listAllTags } from "@/lib/problems";
 import { participationLabel, ratingDelta } from "@/lib/contest-labels";
 import { listContests, parseContestFilters, type ContestView } from "@/lib/contests";
 import { formatDay } from "@/lib/dates";
+import { PLATFORM_NAMES } from "@/lib/difficulty";
 import { ContestFilterBar } from "./contest-filter-bar";
 
 export default function ContestsPage({ searchParams }: PageProps<"/contests">) {
@@ -33,6 +34,8 @@ async function Contests({ searchParams }: Pick<PageProps<"/contests">, "searchPa
   const params = Object.fromEntries(
     Object.entries(raw).flatMap(([k, v]) => (typeof v === "string" ? [[k, v]] : [])),
   );
+  // Only worth naming the judge once you have contests on more than one.
+  const judges = [...new Set(all.map((c) => c.platform))];
 
   return (
     <>
@@ -45,8 +48,8 @@ async function Contests({ searchParams }: Pick<PageProps<"/contests">, "searchPa
         <div className="rounded-lg border border-dashed border-rule bg-sheet px-6 py-14 text-center">
           <p className="font-medium">No contests yet.</p>
           <p className="mx-auto mt-1 max-w-md text-pencil">
-            Sync your Codeforces account and every contest you took part in, did virtually or
-            solved a problem from shows up here.
+            Sync your Codeforces or AtCoder account and every contest you took part in, did
+            virtually or solved a problem from shows up here.
           </p>
           <Link href="/sync" className="mt-5 inline-flex h-10 items-center rounded-md border border-ink px-4 font-medium hover:bg-paper">
             Go to Sync
@@ -55,7 +58,7 @@ async function Contests({ searchParams }: Pick<PageProps<"/contests">, "searchPa
       ) : (
         <>
           <div className="flex flex-col gap-3">
-            <ContestFilterBar params={params} />
+            <ContestFilterBar params={params} judges={judges} />
             <LetterLegend />
           </div>
           <div className="mt-4 overflow-hidden rounded-lg border border-rule bg-sheet">
@@ -65,7 +68,7 @@ async function Contests({ searchParams }: Pick<PageProps<"/contests">, "searchPa
               <ProblemPaneProvider allTags={tags}>
                 <ul className="divide-y divide-rule">
                   {shown.map((c) => (
-                    <ContestRow key={c.id} contest={c} />
+                    <ContestRow key={c.id} contest={c} showJudge={judges.length > 1} />
                   ))}
                 </ul>
               </ProblemPaneProvider>
@@ -77,7 +80,7 @@ async function Contests({ searchParams }: Pick<PageProps<"/contests">, "searchPa
   );
 }
 
-function ContestRow({ contest: c }: { contest: ContestView }) {
+function ContestRow({ contest: c, showJudge }: { contest: ContestView; showJudge: boolean }) {
   const delta = ratingDelta(c);
   return (
     <li className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between md:gap-6">
@@ -86,6 +89,7 @@ function ContestRow({ contest: c }: { contest: ContestView }) {
           {c.name}
         </Link>
         <div className="mt-0.5 flex flex-wrap gap-x-3 text-meta text-pencil">
+          {showJudge && <span>{PLATFORM_NAMES[c.platform]}</span>}
           {c.date && <span className="tabular">{formatDay(c.date)}</span>}
           <span>{participationLabel(c)}</span>
           {c.rank != null && <span className="tabular">Rank {c.rank}</span>}

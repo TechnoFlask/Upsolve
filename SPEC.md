@@ -13,7 +13,7 @@ Codeforces, LeetCode, AtCoder (and more later) into one filterable web app.
 | Database | SQLite via libSQL — local `.db` file in dev, Turso in production (same code, different URL) |
 | ORM / migrations | Drizzle ORM + drizzle-kit |
 | Validation | zod |
-| AI helper | OpenRouter (key server-side only) |
+| AI | Vercel AI SDK (`generateText` + `Output.object`) with the OpenRouter provider; key server-side only |
 
 ## Access control (single user)
 
@@ -61,38 +61,78 @@ Per-platform handle and `lastSyncedAt`.
 | Platform | Source | What we get |
 |---|---|---|
 | Codeforces | Official API: `user.status`, `user.rating`, `problemset.problems` | Full submission history (→ tries, first AC date), rating, tags; contest rating history |
-| AtCoder | Community AtCoder Problems API (kenkoooo) + `atcoder.jp/users/{u}/history/json` | Submissions, estimated difficulty; contest history |
+| AtCoder | AtCoder Problems (kenkoooo): `user/submissions` (500 per page), `merged-problems`, `problem-models`, `contests`, `contest-problem`; plus `atcoder.jp/users/{u}/history/json` | Submissions (→ tries, first AC, in-contest or not), difficulty estimates clipped like AtCoder Problems shows them (below 400 squashed towards 0), contest history with rank and rating. No tags. Virtual participations aren't exposed. Contest names prefer the English name. Long-running practice sets (APG4b, abs) aren't contests. A problem links to the contest you last solved it in (shared ABC/ARC problems). |
 | LeetCode | Unofficial GraphQL (`recentAcSubmissionList`, `userContestRankingHistory`) | Only ~20 most recent ACs → sync often; older ones via manual / quick-add-by-URL |
 
-- "Sync now" button per platform plus a daily Vercel Cron job.
-- Sync is an upsert: it fills platform facts (name, url, difficulty, tags, tries, solvedAt) but never
-  clobbers fields the user edited (notes, status, usedEditorial, AI approach).
-- Unsolved problems from a participated contest land in status `upsolve`.
+- "Sync now" button per platform plus a daily Vercel Cron job. Codeforces allows one call per 2 s, AtCoder Problems asks for > 1 s between calls; both are throttled.
+- An AtCoder username with no submissions and no contests is rejected rather than saved, because AtCoder can't tell an unknown user from a new one.
+- Sync is an upsert: it fills platform facts (name, url, difficulty, tags, tries, solvedAt, latest accepted
+  submission) but never clobbers fields the user edited (notes, status, usedEditorial, solution code, analysis).
+- Unsolved contest problems are added to the upsolve queue on request ("Add to upsolve queue"), not automatically.
 
 ## Views
 
-1. **Problems table** — sort, filter (platform, tag, difficulty range, status, date range, editorial used),
-   full-text search on name/ID/notes; add/edit drawer; quick-add by pasting a problem URL.
+0. **Today** (home after unlocking) — the daily practice plan. See "Daily practice planner" below.
+1. **Problems table** — columns: problem, platform (with its ID), difficulty, status, tries, tags, solved date.
+   Excel-style filters in each column header: platform; status and editorial used; difficulty range; tries
+   (first try / 2–3 / 4+ or a range); tags (all or any of them, searchable); solved date (last 7 / 30 days,
+   this year or a range) and solved during a live contest, virtual or practice. Active filters show as
+   removable chips above the table; on phones a Filters panel holds them all, plus sort. Sortable by any
+   column but status and tags; full-text search on name/ID/notes; all state lives in the URL. Add/edit
+   drawer; quick-add by pasting a problem URL.
 2. **Upsolve / revisit queue** — problems with status `upsolve` or `revisit`.
 3. **Contests** — every contest you took part in live, unofficially or virtually, or solved any problem
    from, with rank and rating change. Each row shows the contest's full problem set as letters coloured by
-   your result (solved during the contest / upsolved / attempted / queued / not tried). The detail page
+   your result (solved during the contest / upsolved / attempted / queued / not tried), filterable by judge once
+   there are contests on more than one. The detail page
    lists each problem with an "Add to upsolve queue" button. Data: `contests` + `contest_problems`
    (the full set from `problemset.problems`), joined to `problems` for your status. Gym contests are not
    shown yet.
-4. **Dashboard** — solves over time, streak heatmap, tag breakdown (weak topics), rating graphs per platform.
-5. **Problem detail** — notes, metadata, "Generate approach" (AI, hidden until revealed).
+4. **Dashboard** — daily solve heatmap with current/longest streak; per judge (Codeforces always, AtCoder once
+   synced) a rating graph over its tier bands and a solved-by-rating histogram (tier-coloured); and per-tag solved/unsolved with weak topics flagged
+   (≥2 problems and under 60% solved, or editorial used on half or more).
+5. **Solution analysis** (in the problem side pane) — paste your accepted code (the pane links to your
+   latest accepted submission; Codeforces' submission pages are behind a Cloudflare bot check, so the app
+   can't fetch the code itself). An OpenRouter model returns pseudo-code mirroring your solution, its time and
+   space complexity, whether it's optimal, and if not the optimal bounds plus 2–4 progressive hints revealed
+   one at a time. It also names 1–4 topics the solution uses, from Codeforces' tag vocabulary (anything else is
+   dropped); each can be added as a tag in one click, or all at once. That's how AtCoder and LeetCode problems, which
+   have no tags of their own, get topics for filters and the dashboard. Code and analysis are stored on the problem. Calls can take up to ~60s; on Vercel the
+   function needs a long enough `maxDuration`.
 
 Mobile-friendly layout throughout (used from phone).
 
+## Daily practice planner
+
+Code decides what's eligible; the AI only chooses among real, vetted problems and explains why.
+Plans are built from Codeforces only for now; AtCoder solves count towards the dashboard but not the level.
+
+- **Catalogue**: every sync stores Codeforces' full problemset with solve counts (`problemset` table).
+- **Level** (the rating you solve comfortably) = 75th percentile of your no-editorial Codeforces solves in
+  the last 60 days (all time if fewer than 5), min 800. It then adapts: over the last 3 plans at the current
+  level, core/stretch problems you touched score clean = 1, with editorial = 0.5, attempted = 0 (stretch ×1.5).
+  Average ≥ 0.75 → +100, ≤ 0.3 → −100, needs ≥ 3 scored. Untouched problems don't count. Never below the estimate.
+- **Slots** (Light 3 / Regular 5 / Intense 7): warm-up at level; core at +100/+200; weak spot at level on a
+  focus topic (a tag flagged weak, else the least-practised level-appropriate curriculum tag); stretch at +300;
+  plus an optional upsolve (earlier plan problems attempted but unsolved, then the upsolve queue, then other
+  attempted problems) on Regular/Intense.
+- **Candidates** per slot: exactly the target rating, not `*special`, never tracked or suggested in the last
+  60 days, no same-name duplicates (Div 1/Div 2 copies); ranked by log(solve count) + contest recency, top 30
+  shuffled with a day-based seed, 6 offered.
+- **Coach** (AI, optional): gets your profile and the shortlists; returns a theme, a short coaching note and
+  one pick + reason per slot. Picks not in that slot's shortlist, or duplicates, fall back to the
+  deterministic pick. Without a key, or if the call fails, the whole plan is picked by rules with template reasons.
+- **Progress**: item status comes live from your tracked problems (solved / with editorial / attempted /
+  not started); "Check progress" re-syncs. Unstarted items can be swapped for another fitting problem.
+- **History**: recent days with level and per-problem outcome, and the level trend.
+
 ## Build phases
 
-1. **Foundation** — project scaffold, DB schema + migrations, passcode lock, problems table with manual add/edit, filters.
-2. **Codeforces + AtCoder sync** (incl. quick-add by URL).
-3. **LeetCode sync.**
-4. **Contests + dashboard.**
-5. **AI approach helper** (OpenRouter).
-6. **Deploy** — Turso DB, Vercel env vars, daily cron.
+1. ~~**Foundation**~~ — done.
+2. **Sync** — Codeforces and AtCoder done (problems + contests); LeetCode to do.
+3. ~~**Contests + dashboard**~~ — done.
+4. ~~**AI solution analysis**~~ — done.
+5. **Deploy** — Turso DB, Vercel env vars, daily cron.
 
 ## Environment variables
 
@@ -103,5 +143,6 @@ Mobile-friendly layout throughout (used from phone).
 | `UPSOLVE_PASSCODE_HASH` | Output of `bun hash-passcode` |
 | `AUTH_SECRET` | Random 32+ byte secret for cookie signing |
 | `NEXT_PUBLIC_TIMEZONE` | IANA zone used to display solve dates (default `Asia/Kolkata`) |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Phase 5 |
-| `CRON_SECRET` | Phase 6, authenticates Vercel Cron calls |
+| `OPENROUTER_API_KEY` | Solution analysis |
+| `OPENROUTER_MODEL` | Optional, default `anthropic/claude-sonnet-5.5` |
+| `CRON_SECRET` | Deploy phase, authenticates Vercel Cron calls |

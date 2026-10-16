@@ -5,10 +5,21 @@ import { useState } from "react";
 import type { Problem } from "@/db/schema";
 import { formatDay } from "@/lib/dates";
 import { PLATFORM_NAMES, STATUS_META, difficultyText, tierColor } from "@/lib/difficulty";
+import { FilterBar } from "./filter-bar";
 import { OpenLink } from "./open-link";
+import {
+  ColumnFilter,
+  DifficultyFilter,
+  PlatformFilter,
+  SolvedFilter,
+  StatusFilter,
+  TagFilter,
+  TriesFilter,
+  useProblemFilters,
+} from "./problem-filters";
 import { ProblemDialog } from "./problem-dialog";
 
-type SortField = "solvedAt" | "difficulty" | "name" | "tries" | "updatedAt";
+type SortField = "solvedAt" | "difficulty" | "name" | "platform" | "tries" | "updatedAt";
 
 type Props = {
   problems: Problem[];
@@ -16,11 +27,9 @@ type Props = {
   summary: string;
   isEmpty: boolean;
   filtered: boolean;
-  filterBar: React.ReactNode;
   sort: { field: SortField; dir: "asc" | "desc" };
   params: Record<string, string>;
 };
-
 
 export function ProblemList(props: Props) {
   // null = closed, "new" = add form, Problem = edit form
@@ -46,18 +55,11 @@ export function ProblemList(props: Props) {
         <EmptyState onAdd={() => setEditing("new")} />
       ) : (
         <>
-          {props.filterBar}
+          <FilterBar params={props.params} allTags={props.allTags} />
           <div className="mt-4 overflow-hidden rounded-lg border border-rule bg-sheet">
-            {props.problems.length === 0 ? (
-              <p className="px-4 py-10 text-center text-pencil">
-                No problems match these filters.
-              </p>
-            ) : (
-              <>
-                <DesktopTable {...props} onOpen={setEditing} />
-                <MobileList problems={props.problems} onOpen={setEditing} />
-              </>
-            )}
+            {/* The table keeps its header when nothing matches, so filters can be undone there. */}
+            <DesktopTable {...props} onOpen={setEditing} />
+            <MobileList problems={props.problems} onOpen={setEditing} />
           </div>
           {props.filtered && props.problems.length > 0 && (
             <p className="mt-3 text-meta text-pencil">
@@ -90,26 +92,42 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-function SortHeader(props: {
-  field: SortField;
+const NO_MATCH = "No problems match these filters.";
+
+/** A column header: its label (a sort link where sortable) and, optionally, its filter. */
+function Header(props: {
   label: string;
+  field?: SortField;
   sort: Props["sort"];
   params: Props["params"];
-  className?: string;
+  align?: "right";
+  filter?: { active: boolean; content: React.ReactNode };
 }) {
-  const active = props.sort.field === props.field;
+  const active = props.field && props.sort.field === props.field;
   const nextDir = active && props.sort.dir === "desc" ? "asc" : "desc";
-  const qs = new URLSearchParams({ ...props.params, sort: props.field, dir: nextDir });
+  const qs = new URLSearchParams({ ...props.params, sort: props.field ?? "", dir: nextDir });
+  const labelClass = active || props.filter?.active ? "text-ink" : "hover:text-ink";
   return (
     <th
       scope="col"
       aria-sort={active ? (props.sort.dir === "asc" ? "ascending" : "descending") : undefined}
-      className={`px-4 py-2.5 font-normal ${props.className ?? ""}`}
+      className="px-4 py-2 font-normal"
     >
-      <Link href={`?${qs}`} scroll={false} replace className={active ? "text-ink" : "hover:text-ink"}>
-        {props.label}
-        {active && <span aria-hidden>{props.sort.dir === "asc" ? " ↑" : " ↓"}</span>}
-      </Link>
+      <div className={`flex items-center gap-1 ${props.align === "right" ? "justify-end" : ""}`}>
+        {props.field ? (
+          <Link href={`?${qs}`} scroll={false} replace className={labelClass}>
+            {props.label}
+            {active && <span aria-hidden>{props.sort.dir === "asc" ? " ↑" : " ↓"}</span>}
+          </Link>
+        ) : (
+          <span className={props.filter?.active ? "text-ink" : ""}>{props.label}</span>
+        )}
+        {props.filter && (
+          <ColumnFilter label={props.label} active={props.filter.active} align={props.align === "right" ? "end" : "start"}>
+            {props.filter.content}
+          </ColumnFilter>
+        )}
+      </div>
     </th>
   );
 }
@@ -139,19 +157,30 @@ function StatusText({ p }: { p: Problem }) {
 
 function DesktopTable(props: Props & { onOpen: (p: Problem) => void }) {
   const { sort, params } = props;
+  const f = useProblemFilters(params);
+  const has = (...keys: string[]) => keys.some((k) => Boolean(params[k]));
+  const header = { sort, params };
   return (
     <table className="hidden w-full text-left md:table">
       <thead className="border-b border-rule text-meta text-pencil">
         <tr>
-          <SortHeader field="name" label="Problem" sort={sort} params={params} />
-          <SortHeader field="difficulty" label="Difficulty" sort={sort} params={params} className="text-right" />
-          <th scope="col" className="px-4 py-2.5 font-normal">Status</th>
-          <SortHeader field="tries" label="Tries" sort={sort} params={params} className="text-right" />
-          <th scope="col" className="px-4 py-2.5 font-normal">Tags</th>
-          <SortHeader field="solvedAt" label="Solved" sort={sort} params={params} className="text-right" />
+          <Header {...header} label="Problem" field="name" />
+          <Header {...header} label="Platform" field="platform" filter={{ active: has("platform"), content: <PlatformFilter f={f} /> }} />
+          <Header {...header} label="Difficulty" field="difficulty" align="right" filter={{ active: has("minDifficulty", "maxDifficulty"), content: <DifficultyFilter f={f} /> }} />
+          <Header {...header} label="Status" filter={{ active: has("status", "editorial"), content: <StatusFilter f={f} /> }} />
+          <Header {...header} label="Tries" field="tries" align="right" filter={{ active: has("minTries", "maxTries"), content: <TriesFilter f={f} /> }} />
+          <Header {...header} label="Tags" filter={{ active: has("tag"), content: <TagFilter f={f} allTags={props.allTags} /> }} />
+          <Header {...header} label="Solved" field="solvedAt" align="right" filter={{ active: has("from", "to", "during"), content: <SolvedFilter f={f} /> }} />
         </tr>
       </thead>
       <tbody className="divide-y divide-rule">
+        {props.problems.length === 0 && (
+          <tr>
+            <td colSpan={7} className="px-4 py-10 text-center text-pencil">
+              {NO_MATCH}
+            </td>
+          </tr>
+        )}
         {props.problems.map((p) => (
           <tr key={p.id} className="align-top hover:bg-paper/60">
             <td className="px-4 py-3">
@@ -159,9 +188,10 @@ function DesktopTable(props: Props & { onOpen: (p: Problem) => void }) {
                 <ProblemName p={p} onOpen={props.onOpen} />
                 <OpenLink url={p.url} name={p.name} />
               </div>
-              <div className="tabular text-meta text-pencil">
-                {PLATFORM_NAMES[p.platform]} {p.externalId}
-              </div>
+            </td>
+            <td className="whitespace-nowrap px-4 py-3">
+              <div>{PLATFORM_NAMES[p.platform]}</div>
+              <div className="tabular text-meta text-pencil">{p.externalId}</div>
             </td>
             <td className="tabular px-4 py-3 text-right">
               {difficultyText(p.platform, p.difficulty, p.difficultyLabel)}
@@ -185,6 +215,7 @@ function DesktopTable(props: Props & { onOpen: (p: Problem) => void }) {
 function MobileList({ problems, onOpen }: { problems: Problem[]; onOpen: (p: Problem) => void }) {
   return (
     <ul className="divide-y divide-rule md:hidden">
+      {problems.length === 0 && <li className="px-4 py-10 text-center text-pencil">{NO_MATCH}</li>}
       {problems.map((p) => (
         <li key={p.id} className="flex flex-col gap-1 px-4 py-3">
           <div className="flex items-start justify-between gap-3">
@@ -194,8 +225,9 @@ function MobileList({ problems, onOpen }: { problems: Problem[]; onOpen: (p: Pro
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-pencil">
-            <span className="tabular">
-              {PLATFORM_NAMES[p.platform]} {p.externalId}
+            <span>
+              <span className="font-medium text-ink">{PLATFORM_NAMES[p.platform]}</span>{" "}
+              <span className="tabular">{p.externalId}</span>
             </span>
             <span className="text-ink">
               <StatusText p={p} />

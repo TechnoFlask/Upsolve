@@ -2,9 +2,9 @@ import type { Platform, Status } from "@/lib/constants";
 
 // Rating-tier ink, after each platform's own colour scheme. Hues are darkened
 // where the original fails contrast on white (CF orange, AtCoder yellow/cyan).
-type Tier = { below: number; color: string; name: string };
+export type Tier = { below: number; color: string; name: string };
 
-const CODEFORCES: Tier[] = [
+export const CODEFORCES: Tier[] = [
   { below: 1200, color: "#6b7280", name: "Newbie" },
   { below: 1400, color: "#0a7d2c", name: "Pupil" },
   { below: 1600, color: "#00897b", name: "Specialist" },
@@ -14,7 +14,7 @@ const CODEFORCES: Tier[] = [
   { below: Infinity, color: "#d11a1a", name: "Grandmaster" },
 ];
 
-const ATCODER: Tier[] = [
+export const ATCODER: Tier[] = [
   { below: 400, color: "#6b7280", name: "Gray" },
   { below: 800, color: "#804000", name: "Brown" },
   { below: 1200, color: "#0a7d2c", name: "Green" },

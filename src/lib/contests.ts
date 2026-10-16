@@ -3,7 +3,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import { contestProblems, contests, problems, type Contest, type Problem } from "@/db/schema";
-import type { SolvedDuring, Status } from "@/lib/constants";
+import type { Platform, SolvedDuring, Status } from "@/lib/constants";
 
 /**
  * Your result on one problem of a contest:
@@ -17,6 +17,7 @@ export type ProblemState = "during" | "upsolved" | "attempted" | "queued" | "unt
 
 export type ContestProblemView = {
   id: number;
+  platform: Platform;
   index: string;
   name: string;
   url: string | null;
@@ -54,6 +55,7 @@ export const contestFiltersSchema = z.object({
     .pipe(z.array(z.enum(PARTICIPATION_FILTERS)))
     .catch([]),
   left: z.enum(["1"]).optional().catch(undefined),
+  judge: z.enum(["codeforces", "atcoder"]).optional().catch(undefined),
 });
 export type ContestFilters = z.infer<typeof contestFiltersSchema>;
 
@@ -61,6 +63,7 @@ export function parseContestFilters(params: Record<string, string | string[] | u
   return contestFiltersSchema.parse({
     type: typeof params.type === "string" ? params.type : undefined,
     left: typeof params.left === "string" ? params.left : undefined,
+    judge: typeof params.judge === "string" ? params.judge : undefined,
   });
 }
 
@@ -87,6 +90,7 @@ async function loadContests(contestId?: number): Promise<ContestView[]> {
     const state = stateOf(p);
     view.problems.push({
       id: cp.id,
+      platform: contest.platform,
       index: cp.index,
       name: cp.name,
       url: cp.url,
@@ -115,7 +119,7 @@ export async function listContests(filters: ContestFilters) {
   };
   return {
     all,
-    shown: all.filter((c) => matchesType(c) && (!filters.left || c.left > 0)),
+    shown: all.filter((c) => matchesType(c) && (!filters.left || c.left > 0) && (!filters.judge || c.platform === filters.judge)),
   };
 }
 

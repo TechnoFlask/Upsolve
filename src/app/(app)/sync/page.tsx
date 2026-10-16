@@ -1,9 +1,8 @@
-import { eq } from "drizzle-orm";
 import { Suspense } from "react";
 import { db } from "@/db";
 import { accounts } from "@/db/schema";
 import { requireSession } from "@/lib/auth";
-import { CodeforcesSync } from "./codeforces-sync";
+import { JudgeSync } from "./judge-sync";
 
 export default function SyncPage() {
   return (
@@ -16,18 +15,31 @@ export default function SyncPage() {
       <Suspense fallback={<div className="mt-8 h-40 rounded-lg border border-rule bg-sheet" />}>
         <Accounts />
       </Suspense>
-      <p className="mt-6 text-meta text-pencil">LeetCode and AtCoder sync come next.</p>
+      <p className="mt-6 text-meta text-pencil">LeetCode sync comes next.</p>
     </main>
   );
 }
 
 async function Accounts() {
   await requireSession();
-  const cf = await db.query.accounts.findFirst({ where: eq(accounts.platform, "codeforces") });
+  const rows = await db.select().from(accounts);
+  const account = (platform: string) => rows.find((a) => a.platform === platform);
+  const cf = account("codeforces");
+  const ac = account("atcoder");
   return (
-    <CodeforcesSync
-      handle={cf?.handle ?? ""}
-      lastSyncedAt={cf?.lastSyncedAt ?? null}
-    />
+    <div className="mt-8 flex flex-col gap-5">
+      <JudgeSync
+        judge="codeforces"
+        handle={cf?.handle ?? ""}
+        lastSyncedAt={cf?.lastSyncedAt ?? null}
+        note="Every submission, with ratings and tags, plus your rated, unofficial and virtual contests."
+      />
+      <JudgeSync
+        judge="atcoder"
+        handle={ac?.handle ?? ""}
+        lastSyncedAt={ac?.lastSyncedAt ?? null}
+        note="Every submission with AtCoder Problems' difficulty estimates, plus your contest history. AtCoder has no tags, and virtual participations aren't visible to the app."
+      />
+    </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import { syncCodeforcesAction, type SyncState } from "@/app/sync/actions";
+import { syncAtCoderAction, syncCodeforcesAction, type SyncState } from "@/app/sync/actions";
 import { TIMEZONE, formatDay } from "@/lib/dates";
 
 const timeFormat = new Intl.DateTimeFormat("en-GB", {
@@ -11,16 +11,33 @@ const timeFormat = new Intl.DateTimeFormat("en-GB", {
   timeZone: TIMEZONE,
 });
 
-export function CodeforcesSync({ handle, lastSyncedAt }: { handle: string; lastSyncedAt: Date | null }) {
-  const [state, action, pending] = useActionState<SyncState, FormData>(syncCodeforcesAction, {});
+const JUDGES = {
+  codeforces: { name: "Codeforces", label: "Handle", placeholder: "tourist", action: syncCodeforcesAction },
+  atcoder: { name: "AtCoder", label: "Username", placeholder: "chokudai", action: syncAtCoderAction },
+};
+
+export function JudgeSync({
+  judge,
+  handle,
+  lastSyncedAt,
+  note,
+}: {
+  judge: keyof typeof JUDGES;
+  handle: string;
+  lastSyncedAt: Date | null;
+  /** What this judge's sync brings in. */
+  note: string;
+}) {
+  const { name, label, placeholder, action: syncAction } = JUDGES[judge];
+  const [state, action, pending] = useActionState<SyncState, FormData>(syncAction, {});
   // Controlled, because React resets uncontrolled fields after a form action.
   const [value, setValue] = useState(handle);
 
   return (
-    <section aria-labelledby="cf-heading" className="mt-8 rounded-lg border border-rule bg-sheet p-5">
+    <section aria-labelledby={`${judge}-heading`} className="rounded-lg border border-rule bg-sheet p-5">
       <div className="flex items-baseline justify-between gap-4">
-        <h2 id="cf-heading" className="text-lg font-semibold">
-          Codeforces
+        <h2 id={`${judge}-heading`} className="text-lg font-semibold">
+          {name}
         </h2>
         <p className="text-meta text-pencil">
           {lastSyncedAt
@@ -28,13 +45,14 @@ export function CodeforcesSync({ handle, lastSyncedAt }: { handle: string; lastS
             : "Never synced"}
         </p>
       </div>
+      <p className="mt-1 max-w-prose text-meta text-pencil">{note}</p>
       <form action={action} className="mt-4 flex flex-wrap items-end gap-3">
         <div className="flex min-w-48 flex-1 flex-col gap-1.5">
-          <label htmlFor="cf-handle" className="text-meta text-pencil">
-            Handle
+          <label htmlFor={`${judge}-handle`} className="text-meta text-pencil">
+            {label}
           </label>
           <input
-            id="cf-handle"
+            id={`${judge}-handle`}
             name="handle"
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -42,7 +60,7 @@ export function CodeforcesSync({ handle, lastSyncedAt }: { handle: string; lastS
             autoCapitalize="off"
             autoCorrect="off"
             spellCheck={false}
-            placeholder="tourist"
+            placeholder={placeholder}
             className="h-10 rounded-md border border-rule bg-sheet px-3 outline-none focus:border-ink"
           />
         </div>

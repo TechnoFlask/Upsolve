@@ -2,6 +2,8 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useTransition } from "react";
+import type { Platform } from "@/lib/constants";
+import { PLATFORM_NAMES } from "@/lib/difficulty";
 
 type Params = Record<string, string>;
 
@@ -11,7 +13,7 @@ const TYPES = [
   { value: "practice", label: "Practice only" },
 ];
 
-export function ContestFilterBar({ params }: { params: Params }) {
+export function ContestFilterBar({ params, judges }: { params: Params; judges: Platform[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
@@ -31,6 +33,21 @@ export function ContestFilterBar({ params }: { params: Params }) {
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-3 text-meta" aria-busy={pending}>
+      {judges.length > 1 && (
+        <div role="group" aria-label="Judge" className="flex flex-wrap gap-1">
+          {judges.map((j) => (
+            <button
+              key={j}
+              type="button"
+              aria-pressed={params.judge === j}
+              onClick={() => navigate({ ...params, judge: params.judge === j ? "" : j })}
+              className={chip(params.judge === j)}
+            >
+              {PLATFORM_NAMES[j]}
+            </button>
+          ))}
+        </div>
+      )}
       <div role="group" aria-label="How you took part" className="flex flex-wrap gap-1">
         {TYPES.map((t) => (
           <button key={t.value} type="button" aria-pressed={types.includes(t.value)} onClick={() => toggleType(t.value)} className={chip(types.includes(t.value))}>

@@ -1,4 +1,5 @@
-import type { Participation, SolvedDuring, Status } from "../constants";
+import type { Participation, SolvedDuring } from "../constants";
+import { PARTICIPATION_RANK, sameTags, type SyncedContest, type SyncedProblem } from "./merge";
 
 // Subsets of https://codeforces.com/apiHelp/objects that we use.
 export type CfProblem = {
@@ -16,6 +17,7 @@ export type CfSubmission = {
   problem: CfProblem;
   author: { participantType: string };
   verdict?: string;
+  programmingLanguage?: string;
 };
 
 export type CfRatingChange = {
@@ -32,39 +34,6 @@ export type CfContest = {
   name: string;
   phase: string;
   startTimeSeconds?: number;
-};
-
-export type SyncedProblem = {
-  externalId: string;
-  name: string;
-  url: string;
-  difficulty: number | null;
-  tags: string[];
-  status: Extract<Status, "solved" | "attempted">;
-  tries: number;
-  solvedAt: Date | null;
-  solvedDuring: SolvedDuring | null;
-};
-
-export type SyncedContestProblem = {
-  index: string;
-  externalId: string;
-  name: string;
-  url: string;
-  difficulty: number | null;
-  tags: string[];
-};
-
-export type SyncedContest = {
-  externalId: string;
-  name: string;
-  url: string;
-  date: Date | null;
-  participation: Participation;
-  rank: number | null;
-  oldRating: number | null;
-  newRating: number | null;
-  problems: SyncedContestProblem[];
 };
 
 // Verdicts that don't count as an attempt (Codeforces doesn't penalise them either).
@@ -108,6 +77,7 @@ export function summarizeSubmissions(submissions: CfSubmission[]): SyncedProblem
     const { problem } = subs[subs.length - 1];
     const contestId = contestIdOf(subs[subs.length - 1])!;
     const ac = firstAc >= 0 ? subs[firstAc] : null;
+    const latestAc = subs.findLast((s) => s.verdict === "OK") ?? null;
 
     result.push({
       externalId,
@@ -119,17 +89,12 @@ export function summarizeSubmissions(submissions: CfSubmission[]): SyncedProblem
       tries: ac ? firstAc + 1 : subs.length,
       solvedAt: ac ? new Date(ac.creationTimeSeconds * 1000) : null,
       solvedDuring: ac ? solvedDuringOf(ac.author.participantType) : null,
+      submissionId: latestAc?.id ?? null,
+      submissionLanguage: latestAc?.programmingLanguage ?? null,
     });
   }
   return result;
 }
-
-const PARTICIPATION_RANK: Record<Participation, number> = {
-  contest: 0,
-  unofficial: 1,
-  virtual: 2,
-  practice: 3,
-};
 
 function participationOf(participantType: string): Participation {
   if (participantType === "CONTESTANT") return "contest";
@@ -210,68 +175,6 @@ export function summarizeContests(input: {
   return result;
 }
 
-type ExistingRow = {
-  name: string;
-  url: string | null;
-  difficulty: number | null;
-  tags: string[];
-  status: Status;
-  tries: number;
-  solvedAt: Date | null;
-  solvedDuring: SolvedDuring | null;
-};
-
-export type MergedFields = ExistingRow;
-
-/**
- * Combine judge facts with what's already tracked. The judge owns name, link,
- * rating, tries and solve date; you own notes, the editorial flag and any
- * status you set yourself, except that solving an "attempted" or "upsolve"
- * problem marks it solved.
- */
-export function mergeWithExisting(incoming: SyncedProblem, existing: ExistingRow | undefined): MergedFields {
-  if (!existing) {
-    return {
-      name: incoming.name,
-      url: incoming.url,
-      difficulty: incoming.difficulty,
-      tags: incoming.tags,
-      status: incoming.status,
-      tries: incoming.tries,
-      solvedAt: incoming.solvedAt,
-      solvedDuring: incoming.solvedDuring,
-    };
-  }
-  const promote = incoming.status === "solved" && (existing.status === "attempted" || existing.status === "upsolve");
-  return {
-    name: incoming.name,
-    url: incoming.url,
-    difficulty: incoming.difficulty ?? existing.difficulty,
-    tags: [...new Set([...existing.tags, ...incoming.tags])],
-    status: promote ? "solved" : existing.status,
-    tries: incoming.tries,
-    solvedAt: incoming.solvedAt ?? existing.solvedAt,
-    solvedDuring: incoming.solvedDuring ?? existing.solvedDuring,
-  };
-}
-
-export function hasChanges(existing: ExistingRow, merged: MergedFields): boolean {
-  return (
-    existing.name !== merged.name ||
-    existing.url !== merged.url ||
-    existing.difficulty !== merged.difficulty ||
-    existing.status !== merged.status ||
-    existing.tries !== merged.tries ||
-    existing.solvedDuring !== merged.solvedDuring ||
-    existing.solvedAt?.getTime() !== merged.solvedAt?.getTime() ||
-    sameTags(existing.tags, merged.tags) === false
-  );
-}
-
-export function sameTags(a: string[], b: string[]): boolean {
-  return a.join("\u0000") === b.join("\u0000");
-}
-
 // Codeforces allows one API call every two seconds per client.
 const MIN_INTERVAL_MS = 2100;
 let lastCallAt = 0;
@@ -299,6 +202,52 @@ export async function fetchAll(handle: string) {
   const submissions = await cfApi<CfSubmission[]>("user.status", { handle });
   const ratingChanges = await cfApi<CfRatingChange[]>("user.rating", { handle });
   const contests = await cfApi<CfContest[]>("contest.list", { gym: "false" });
-  const { problems: problemset } = await cfApi<{ problems: CfProblem[] }>("problemset.problems");
-  return { submissions, ratingChanges, contests, problemset };
+  const { problems: problemset, problemStatistics } = await cfApi<{
+    problems: CfProblem[];
+    problemStatistics: CfProblemStatistics[];
+  }>("problemset.problems");
+  return { submissions, ratingChanges, contests, problemset, problemStatistics };
+}
+
+export type CfProblemStatistics = { contestId?: number; index: string; solvedCount: number };
+
+export type CatalogEntry = {
+  externalId: string;
+  contestId: number;
+  index: string;
+  name: string;
+  rating: number | null;
+  tags: string[];
+  solvedCount: number;
+};
+
+/** The problemset joined with how many people solved each problem. */
+export function buildCatalog(problems: CfProblem[], stats: CfProblemStatistics[]): CatalogEntry[] {
+  const solved = new Map(stats.map((s) => [`${s.contestId}${s.index}`, s.solvedCount]));
+  return problems.flatMap((p) => {
+    if (!p.contestId) return [];
+    const externalId = `${p.contestId}${p.index}`;
+    return [{
+      externalId,
+      contestId: p.contestId,
+      index: p.index,
+      name: p.name,
+      rating: p.rating ?? null,
+      tags: p.tags,
+      solvedCount: solved.get(externalId) ?? 0,
+    }];
+  });
+}
+
+/** Solve counts drift constantly; only rewrite a row when something meaningful changed. */
+export function catalogEntryChanged(
+  existing: Omit<CatalogEntry, "externalId" | "contestId" | "index">,
+  next: CatalogEntry,
+): boolean {
+  return (
+    existing.name !== next.name ||
+    existing.rating !== next.rating ||
+    !sameTags(existing.tags, next.tags) ||
+    Math.abs(next.solvedCount - existing.solvedCount) > Math.max(50, existing.solvedCount * 0.1)
+  );
 }
