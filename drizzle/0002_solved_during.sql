@@ -1,0 +1,1 @@
+ALTER TABLE `problems` ADD `solved_during` text;

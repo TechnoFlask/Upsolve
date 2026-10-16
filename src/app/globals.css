@@ -1,26 +1,78 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Tokens: see DESIGN.md */
+@theme {
+  --color-paper: #eef1f4;
+  --color-sheet: #ffffff;
+  --color-ink: #1b2430;
+  --color-pencil: #5b6878;
+  --color-rule: #d3d9e0;
+  --color-accepted: #16803c;
+  --color-accepted-dark: #106430;
+  --color-wrong: #c62828;
+  --color-amber: #a85f00;
+  --color-revisit: #1d4ed8;
+
+  --font-sans: var(--font-public-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-bricolage), var(--font-public-sans), sans-serif;
+
+  --text-meta: 0.8125rem;
+  --text-body: 0.9375rem;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-size: var(--text-body);
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-revisit);
+  outline-offset: 2px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Native <dialog> as a right-side panel on desktop, full screen on phones. */
+dialog.panel {
+  margin: 0 0 0 auto;
+  height: 100dvh;
+  max-height: 100dvh;
+  width: 100%;
+  max-width: 34rem;
+  border: 0;
+  border-left: 1px solid var(--color-rule);
+  padding: 0;
+  background: var(--color-sheet);
+  color: var(--color-ink);
+  box-shadow: -24px 0 48px -24px rgb(27 36 48 / 0.35);
+}
+dialog.panel::backdrop {
+  background: rgb(27 36 48 / 0.35);
+}
+@media (prefers-reduced-motion: no-preference) {
+  dialog.panel[open] {
+    animation: panel-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+@keyframes panel-in {
+  from {
+    transform: translateX(2.5rem);
+    opacity: 0;
+  }
+}
+@media (max-width: 40rem) {
+  dialog.panel {
+    max-width: none;
+    border-left: 0;
+  }
 }
